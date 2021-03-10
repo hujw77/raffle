@@ -36,7 +36,7 @@ func testTreeMap() {
 
 func main() {
 	// testTreeMap()
-	l, _ := raffle.New("https://eth-ropsten.alchemyapi.io/v2/2YQZgPbO7uI1jsOwJSAHlQ76hTtHefb_", 100000)
+	l, _ := raffle.New("http://localhost:7545", 100000)
 	l.Print()
 	l.Pick()
 	l.Print()
