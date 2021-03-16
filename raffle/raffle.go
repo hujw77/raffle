@@ -2,11 +2,10 @@
 package raffle
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math/big"
-	"math/rand"
-	"time"
 
 	"github.com/emirpasic/gods/maps/treemap"
 	"github.com/ethereum/go-ethereum/common"
@@ -44,16 +43,16 @@ func New(uri string, finalBlock uint64) (*Lottery, error) {
 		},
 		Ticket{
 			user:    common.HexToAddress("0x3333333333333333333333333333333333333333"),
-			balance: new(big.Int).Mul(big.NewInt(1), big.NewInt(params.Ether)),
+			balance: new(big.Int).Mul(big.NewInt(3), big.NewInt(params.Ether)),
 		},
 		Ticket{
 			user:    common.HexToAddress("0x4444444444444444444444444444444444444444"),
-			balance: new(big.Int).Mul(big.NewInt(2), big.NewInt(params.Ether)),
+			balance: new(big.Int).Mul(big.NewInt(4), big.NewInt(params.Ether)),
 		},
-		Ticket{
-			user:    common.HexToAddress("0x5555555555555555555555555555555555555555"),
-			balance: new(big.Int).Mul(big.NewInt(3), big.NewInt(params.Ether)),
-		},
+		// Ticket{
+		// 	user:    common.HexToAddress("0x5555555555555555555555555555555555555555"),
+		// 	balance: new(big.Int).Mul(big.NewInt(3), big.NewInt(params.Ether)),
+		// },
 	}
 	m := treemap.NewWith(comparator.AddressComparator)
 	for _, ticket := range list {
@@ -63,7 +62,7 @@ func New(uri string, finalBlock uint64) (*Lottery, error) {
 		}
 		m.Put(user, balance)
 	}
-	return &Lottery{m, treemap.NewWith(comparator.AddressComparator), 1, finalBlock, client}, nil
+	return &Lottery{m, treemap.NewWith(comparator.AddressComparator), 2, finalBlock, client}, nil
 }
 
 func (l *Lottery) Size() int {
@@ -87,32 +86,68 @@ func (l *Lottery) convert() (*treemap.Map, error) {
 	return m, nil
 }
 
-func init() {
-	rand.Seed(time.Now().UTC().UnixNano())
-}
-
 func (l *Lottery) Pick() {
 	for i := int64(0); i < l.quota; i++ {
 		l.pick()
 	}
 }
 
+var mm map[uint64]common.Hash
+
+// func init() {
+// 	// rand.Seed(time.Now().UTC().UnixNano())
+
+// 	mm = readCsvFile("../csv/query_result.csv")
+// }
+
+// func readCsvFile(filePath string) map[uint64]common.Hash {
+// 	f, err := os.Open(filePath)
+// 	if err != nil {
+// 		log.Fatal("Unable to read input file "+filePath, err)
+// 	}
+// 	defer f.Close()
+
+// 	r := csv.NewReader(f)
+// 	count := uint64(0)
+// 	m := make(map[uint64]common.Hash)
+// 	for {
+// 		record, err := r.Read()
+// 		if err == io.EOF {
+// 			break
+// 		}
+
+// 		if err != nil {
+// 			panic(err)
+// 		}
+// 		for value := range record {
+// 			m[count] = common.HexToHash(record[value])
+// 		}
+// 		count++
+// 	}
+
+// 	return m
+// }
+
 func (l *Lottery) random(max *big.Int) (*big.Int, error) {
 	// block hash
-	// block, err := l.client.BlockByNumber(context.Background(), new(big.Int).SetUint64(l.finalBlock))
-	// if err != nil {
-	// 	return nil, err
-	// }
-	// if block.NumberU64() != l.finalBlock {
-	// 	return nil, errors.New("BlockByNumber returned wrong block")
-	// }
-	// hash := block.Hash()
-	// fmt.Println("hash:", hash)
-	// n := new(big.Int).Mod(hash.Big(), max)
+	block, err := l.client.BlockByNumber(context.Background(), new(big.Int).SetUint64(l.finalBlock))
+	if err != nil {
+		return nil, err
+	}
+	if block.NumberU64() != l.finalBlock {
+		return nil, errors.New("BlockByNumber returned wrong block")
+	}
+	hash := block.Hash()
+
+	// mock test
+	// hash := mm[l.finalBlock]
+
+	fmt.Println("hash:", hash)
+	n := new(big.Int).Mod(hash.Big(), max)
 
 	// math/rand
-	rs := rand.New(rand.NewSource(time.Now().UTC().UnixNano()))
-	n := new(big.Int).Rand(rs, max)
+	// rs := rand.New(rand.NewSource(time.Now().UTC().UnixNano()))
+	// n := new(big.Int).Rand(rs, max)
 
 	n = new(big.Int).Add(n, common.Big1)
 	fmt.Println("n  :", n)
@@ -124,14 +159,15 @@ func (l *Lottery) pick() (bool, error) {
 		return true, nil
 	}
 	m, err := l.convert()
+	fmt.Println("m", m)
 	if err != nil {
 		return false, err
 	}
 	mx, _ := m.Max()
 	max := mx.(*big.Int)
 	fmt.Println("max:", max)
-	d := new(big.Int).Div(max, big.NewInt(l.quota))
-	fmt.Println("d  :", d)
+	// d := new(big.Int).Div(max, big.NewInt(l.quota))
+	// fmt.Println("d  :", d)
 
 	n, err := l.random(max)
 	if err != nil {
