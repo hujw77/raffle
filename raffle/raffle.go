@@ -2,67 +2,47 @@
 package raffle
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"math/big"
 
 	"github.com/emirpasic/gods/maps/treemap"
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/ethclient"
-	"github.com/ethereum/go-ethereum/params"
+	"github.com/emirpasic/gods/utils"
 	"github.com/hujw77/raffle/comparator"
 )
 
+var Big0 = big.NewInt(0)
+var Big1 = big.NewInt(1)
+
 type Ticket struct {
-	user    common.Address
+	user    string
 	balance *big.Int
 }
 
 type Lottery struct {
-	tickets    *treemap.Map
-	luckers    *treemap.Map
-	quota      int64
-	finalBlock uint64
-	client     *ethclient.Client
+	tickets *treemap.Map
+	luckers *treemap.Map
+	hashs   []*big.Int
+	quota   int
 }
 
-func New(uri string, finalBlock uint64) (*Lottery, error) {
-	client, err := ethclient.Dial(uri)
-	if err != nil {
-		return nil, err
+func NewTicket(user string, balance *big.Int) *Ticket {
+	return &Ticket{user, balance}
+}
+
+func NewLottery(tickets []*Ticket, hashs []*big.Int, quota int) (*Lottery, error) {
+	if len(hashs) != quota {
+		return nil, errors.New("Invalid quota or hashs length")
 	}
-	list := []Ticket{
-		Ticket{
-			user:    common.HexToAddress("0x1111111111111111111111111111111111111111"),
-			balance: new(big.Int).Mul(big.NewInt(1), big.NewInt(params.Ether)),
-		},
-		Ticket{
-			user:    common.HexToAddress("0x2222222222222222222222222222222222222222"),
-			balance: new(big.Int).Mul(big.NewInt(2), big.NewInt(params.Ether)),
-		},
-		Ticket{
-			user:    common.HexToAddress("0x3333333333333333333333333333333333333333"),
-			balance: new(big.Int).Mul(big.NewInt(3), big.NewInt(params.Ether)),
-		},
-		Ticket{
-			user:    common.HexToAddress("0x4444444444444444444444444444444444444444"),
-			balance: new(big.Int).Mul(big.NewInt(4), big.NewInt(params.Ether)),
-		},
-		// Ticket{
-		// 	user:    common.HexToAddress("0x5555555555555555555555555555555555555555"),
-		// 	balance: new(big.Int).Mul(big.NewInt(3), big.NewInt(params.Ether)),
-		// },
-	}
-	m := treemap.NewWith(comparator.AddressComparator)
-	for _, ticket := range list {
+	m := treemap.NewWith(utils.StringComparator)
+	for _, ticket := range tickets {
 		user, balance := ticket.user, ticket.balance
-		if balance.Cmp(common.Big0) < 1 {
+		if balance.Cmp(Big0) < 1 {
 			return nil, fmt.Errorf("invalid user=%s, balance=%s", user, balance)
 		}
 		m.Put(user, balance)
 	}
-	return &Lottery{m, treemap.NewWith(comparator.AddressComparator), 2, finalBlock, client}, nil
+	return &Lottery{m, treemap.NewWith(utils.StringComparator), hashs, quota}, nil
 }
 
 func (l *Lottery) Size() int {
@@ -72,8 +52,8 @@ func (l *Lottery) Size() int {
 func (l *Lottery) convert() (*treemap.Map, error) {
 	m := treemap.NewWith(comparator.BigIntComparator)
 	l.tickets.Each(func(key interface{}, value interface{}) {
-		user, balance := key.(common.Address), value.(*big.Int)
-		last := common.Big0
+		user, balance := key.(string), value.(*big.Int)
+		last := Big0
 		if m.Size() > 0 {
 			max, _ := m.Max()
 			last = max.(*big.Int)
@@ -86,127 +66,60 @@ func (l *Lottery) convert() (*treemap.Map, error) {
 	return m, nil
 }
 
-func (l *Lottery) Pick() {
-	for i := int64(0); i < l.quota; i++ {
-		l.pick()
+func (l *Lottery) Pick() (bool, error) {
+	for i := 0; i < l.quota; i++ {
+		if err := l.pick(i); err != nil {
+			return false, err
+		}
 	}
+	return true, nil
 }
 
-var mm map[uint64]common.Hash
-
 // func init() {
-// 	// rand.Seed(time.Now().UTC().UnixNano())
-
-// 	mm = readCsvFile("../csv/query_result.csv")
+// 	rand.Seed(time.Now().UTC().UnixNano())
 // }
 
-// func readCsvFile(filePath string) map[uint64]common.Hash {
-// 	f, err := os.Open(filePath)
-// 	if err != nil {
-// 		log.Fatal("Unable to read input file "+filePath, err)
-// 	}
-// 	defer f.Close()
-
-// 	r := csv.NewReader(f)
-// 	count := uint64(0)
-// 	m := make(map[uint64]common.Hash)
-// 	for {
-// 		record, err := r.Read()
-// 		if err == io.EOF {
-// 			break
-// 		}
-
-// 		if err != nil {
-// 			panic(err)
-// 		}
-// 		for value := range record {
-// 			m[count] = common.HexToHash(record[value])
-// 		}
-// 		count++
-// 	}
-
-// 	return m
-// }
-
-func (l *Lottery) random(max *big.Int) (*big.Int, error) {
-	// block hash
-	block, err := l.client.BlockByNumber(context.Background(), new(big.Int).SetUint64(l.finalBlock))
-	if err != nil {
-		return nil, err
-	}
-	if block.NumberU64() != l.finalBlock {
-		return nil, errors.New("BlockByNumber returned wrong block")
-	}
-	hash := block.Hash()
-
-	// mock test
-	// hash := mm[l.finalBlock]
-
-	fmt.Println("hash:", hash)
-	n := new(big.Int).Mod(hash.Big(), max)
+func (l *Lottery) random(max *big.Int, i int) *big.Int {
+	hash := l.hashs[i]
+	n := new(big.Int).Mod(hash, max)
 
 	// math/rand
 	// rs := rand.New(rand.NewSource(time.Now().UTC().UnixNano()))
 	// n := new(big.Int).Rand(rs, max)
 
-	n = new(big.Int).Add(n, common.Big1)
-	fmt.Println("n  :", n)
-	return n, nil
+	n = new(big.Int).Add(n, Big1)
+	return n
 }
 
-func (l *Lottery) pick() (bool, error) {
-	if l.Finished() {
-		return true, nil
-	}
+func (l *Lottery) pick(i int) error {
 	m, err := l.convert()
-	fmt.Println("m", m)
 	if err != nil {
-		return false, err
+		return err
 	}
 	mx, _ := m.Max()
 	max := mx.(*big.Int)
-	fmt.Println("max:", max)
-	// d := new(big.Int).Div(max, big.NewInt(l.quota))
-	// fmt.Println("d  :", d)
-
-	n, err := l.random(max)
-	if err != nil {
-		return false, err
-	}
-
+	n := l.random(max, i)
 	k, v := m.Ceiling(n)
-	fmt.Println("k  :", k, " v  :", v)
 	l.luckers.Put(v, k)
 	l.tickets.Remove(v)
-	finished := l.Finished()
-	if finished {
-		return true, nil
-	} else {
-		l.incre()
-		return false, nil
-	}
-	return l.Finished(), nil
+	return nil
 }
 
 func (l *Lottery) Print() {
 	fmt.Println("luckers: ", l.luckers)
 	fmt.Println("tickets: ", l.tickets)
+	fmt.Println("hashs: ", l.hashs)
 	fmt.Println("quota: ", l.quota)
-	fmt.Println("final: ", l.finalBlock)
 }
 
 func (l *Lottery) Finished() bool {
-	return l.quota == int64(l.luckers.Size())
+	return l.quota == l.luckers.Size()
 }
 
-func (l *Lottery) Luckers() []common.Address {
-	luckers := []common.Address{}
+func (l *Lottery) Luckers() []string {
+	luckers := []string{}
 	for _, addr := range l.luckers.Keys() {
-		luckers = append(luckers, addr.(common.Address))
+		luckers = append(luckers, addr.(string))
 	}
 	return luckers
-}
-
-func (l *Lottery) incre() {
-	l.finalBlock++
 }
