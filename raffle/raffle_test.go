@@ -116,12 +116,11 @@ func BenchmarkPick(b *testing.B) {
 	}
 	mm := readCsvFile("../csv/query_result.csv")
 	m := make(map[string]int)
-	for i := 0; i < 500000; i++ {
+	for i := 0; i < 1000000; i++ {
 		hashs := []*big.Int{
 			U256(mm[i]),
-			U256(mm[i+1]),
 		}
-		l, _ := NewLottery(tickets, hashs, 2)
+		l, _ := NewLottery(tickets, hashs, 1)
 		l.Pick()
 		for _, addr := range l.Luckers() {
 			m[addr]++
